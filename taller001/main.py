@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
-from metodos import router as metodos_router
-from respuestas_y_estados import router as respuestas_router
+from taller001.metodos import router as metodos_router
+from taller001.respuestas_y_estados import router as respuestas_router
 
 app = FastAPI(
     title="Penguin API",

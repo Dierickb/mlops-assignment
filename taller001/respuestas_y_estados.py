@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 import pandas as pd
-from taller001.modelo_de_datos import PenguinFeatures
-from taller001.carga_modelo import model
+from modelo_de_datos import PenguinFeatures
+from carga_modelo import model
 
 router = APIRouter()
 

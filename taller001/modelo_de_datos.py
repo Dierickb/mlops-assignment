@@ -9,20 +9,19 @@ class Item(BaseModel):
     description: str
 
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PenguinFeatures(BaseModel):
-    unnamed: int
+    unnamed_0: int = Field(0, alias="Unnamed: 0")
     bill_length_mm: float
     bill_depth_mm: float
     flipper_length_mm: float
-    body_mass_g: int
+    body_mass_g: float
     year: int
     island_Dream: int
     island_Torgersen: int
     sex_male: int
 
-@app.post("/items/")
-def create_item(item: Item):
-    return {"message": "Item creado", "item": item}
+    class Config:
+       populate_by_name = True

@@ -1,27 +1,38 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 import pandas as pd
 from modelo_de_datos import PenguinFeatures
-from carga_modelo import model
+from carga_modelo import cargar_modelos
 
 router = APIRouter()
+modelos = cargar_modelos()
+
+def construir_dataframe(datos: PenguinFeatures):
+    return pd.DataFrame([datos.dict(by_alias=True)])
 
 @router.post("/predict")
-def predict_species(data: PenguinFeatures):
-
-    input_data = pd.DataFrame([{
-        "Unnamed: 0": data.unnamed,
-        "bill_length_mm": data.bill_length_mm,
-        "bill_depth_mm": data.bill_depth_mm,
-        "flipper_length_mm": data.flipper_length_mm,
-        "body_mass_g": data.body_mass_g,
-        "year": data.year,
-        "island_Dream": data.island_Dream,
-        "island_Torgersen": data.island_Torgersen,
-        "sex_male": data.sex_male
-    }])
-
-    prediction = model.predict(input_data)
-
+def predict_species(datos: PenguinFeatures):
+    if "decision_tree" not in modelos:
+        raise HTTPException(status_code=500, detail="Modelo principal no cargado.")
+    
+    input_data = construir_dataframe(datos)
+    prediccion = modelos["decision_tree"].predict(input_data)
     return {
-        "predicted_species": prediction[0]
+        "selected_model": "Decision Tree (Default)",
+        "predicted_species": str(prediccion[0])
+    }
+
+@router.post("/predict/{nombre_modelo}")
+def predict_species_por_modelo(nombre_modelo: str, datos: PenguinFeatures):
+    clave = nombre_modelo.lower()
+    if clave not in modelos:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Modelo no disponible. Opciones válidas: {list(modelos.keys())}"
+        )
+    
+    input_data = construir_dataframe(datos)
+    prediccion = modelos[clave].predict(input_data)
+    return {
+        "selected_model": clave,
+        "predicted_species": str(prediccion[0])
     }

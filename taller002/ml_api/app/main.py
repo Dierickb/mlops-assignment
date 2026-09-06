@@ -1,6 +1,6 @@
 from fastapi import FastAPI
-from taller002.ml_api.app.metodos import router as metodos_router
-from taller002.ml_api.app.respuestas_y_estados import router as respuestas_router
+from app.metodos import router as metodos_router
+from app.respuestas_y_estados import router as respuestas_router
 
 app = FastAPI(
     title="API de Penguin",

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 import pandas as pd
-from taller002.ml_api.app.modelo_de_datos import PenguinFeatures
-from taller002.ml_api.app.carga_modelo import cargar_modelos
+from app.modelo_de_datos import PenguinFeatures
+from app.carga_modelo import cargar_modelos
 
 router = APIRouter()
 modelos = cargar_modelos()

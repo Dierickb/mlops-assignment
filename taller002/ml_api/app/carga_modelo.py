@@ -1,8 +1,7 @@
 import pickle
 from pathlib import Path
 
-# Fix: Define the directory path explicitly
-MODEL_DIR = Path(__file__).parent / "modelos"
+MODEL_DIR = Path(__file__).resolve().parents[2] / "models"
 
 def cargar_modelos():
     modelos = {}

@@ -1,38 +1,76 @@
 from fastapi import APIRouter, HTTPException
-import pandas as pd
-from app.modelo_de_datos import PenguinFeatures
-from app.carga_modelo import cargar_modelos
+
+from app.carga_modelo import registry
+from app.modelo_de_datos import PredictRequest, PredictResponse
 
 router = APIRouter()
-modelos = cargar_modelos()
 
-def construir_dataframe(datos: PenguinFeatures):
-    return pd.DataFrame([datos.dict(by_alias=True)])
 
-@router.post("/predict")
-def predict_species(datos: PenguinFeatures):
-    if "decision_tree" not in modelos:
-        raise HTTPException(status_code=500, detail="Modelo principal no cargado.")
-    
-    input_data = construir_dataframe(datos)
-    prediccion = modelos["decision_tree"].predict(input_data)
+@router.get("/health")
+def health():
+    current = registry.current
     return {
-        "selected_model": "Decision Tree (Default)",
-        "predicted_species": str(prediccion[0])
+        "status": "ok",
+        "models_dir": registry.models_dir,
+        "model_loaded": current.model_file if current else None,
     }
 
-@router.post("/predict/{nombre_modelo}")
-def predict_species_por_modelo(nombre_modelo: str, datos: PenguinFeatures):
-    clave = nombre_modelo.lower()
-    if clave not in modelos:
+
+@router.get("/models")
+def list_models():
+    files = registry.list_model_files()
+    current = registry.current
+    return {
+        "available_models": files,
+        "current_model": current.model_file if current else None,
+    }
+
+
+@router.post("/reload")
+def reload_model():
+    loaded = registry.force_reload()
+    if loaded is None:
         raise HTTPException(
-            status_code=400, 
-            detail=f"Modelo no disponible. Opciones válidas: {list(modelos.keys())}"
+            status_code=404,
+            detail=f"No hay modelos (.joblib) en {registry.models_dir}. "
+            "Entrena uno primero desde el notebook.",
         )
-    
-    input_data = construir_dataframe(datos)
-    prediccion = modelos[clave].predict(input_data)
-    return {
-        "selected_model": clave,
-        "predicted_species": str(prediccion[0])
-    }
+    return {"reloaded": True, "model_file": loaded.model_file}
+
+
+@router.post("/predict", response_model=PredictResponse)
+def predict_species(datos: PredictRequest):
+    loaded = registry.refresh_if_needed()
+    if loaded is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay modelos (.joblib) en {registry.models_dir}. "
+            "Entrena uno primero desde el notebook (train_model.ipynb).",
+        )
+
+    expected_features = len(loaded.metadata.get("feature_names", []) or [])
+    if expected_features and len(datos.features) != expected_features:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"El modelo '{loaded.model_file}' espera {expected_features} "
+                f"features ({loaded.metadata.get('feature_names')}), "
+                f"se recibieron {len(datos.features)}."
+            ),
+        )
+
+    prediction = int(loaded.model.predict([datos.features])[0])
+
+    target_names = loaded.metadata.get("target_names")
+    label = (
+        target_names[prediction]
+        if target_names and 0 <= prediction < len(target_names)
+        else None
+    )
+
+    return PredictResponse(
+        prediction=prediction,
+        prediction_label=label,
+        model_file=loaded.model_file,
+        model_trained_at=loaded.metadata.get("created_at"),
+    )

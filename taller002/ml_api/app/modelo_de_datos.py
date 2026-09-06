@@ -1,27 +1,17 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
 
-app = FastAPI()
-
-class Item(BaseModel):
-    name: str
-    price: float
-    description: str
-
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 
-class PenguinFeatures(BaseModel):
-    unnamed_0: int = Field(0, alias="Unnamed: 0")
-    bill_length_mm: float
-    bill_depth_mm: float
-    flipper_length_mm: float
-    body_mass_g: float
-    year: int
-    island_Dream: int
-    island_Torgersen: int
-    sex_male: int
+class PredictRequest(BaseModel):
+    features: List[float] = Field(
+        ..., min_length=1, description="Vector de features de entrada"
+    )
 
-    class Config:
-       populate_by_name = True
+
+class PredictResponse(BaseModel):
+    prediction: int
+    prediction_label: Optional[str] = None
+    model_file: str
+    model_trained_at: Optional[str] = None

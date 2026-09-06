@@ -3,8 +3,8 @@ from app.metodos import router as metodos_router
 from app.respuestas_y_estados import router as respuestas_router
 
 app = FastAPI(
-    title="API de Penguin",
-    description="API para predicción de especies de pingüinos",
+    title="ML Inference API",
+    description="Sirve inferencias con el modelo mas reciente entrenado en ml_jupyter/train_model.ipynb",
     version="1.0.0"
 )
 

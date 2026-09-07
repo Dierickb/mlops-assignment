@@ -57,6 +57,24 @@ docker compose up --build
    para generar un **modelo nuevo**. La API siempre usa el más reciente
    por fecha de modificación.
 
+### También hay un notebook de pingüinos
+
+`train_model_penguins.ipynb` entrena un `DecisionTreeClassifier` sobre
+el dataset *Palmer Penguins* (paquete `palmerpenguins`, viene con el
+CSV incluido, no necesita internet). Guarda el modelo con el mismo
+formato (`model_<timestamp>.joblib` + `.json` con `feature_names` y
+`target_names`), así que la API lo consume sin ningún cambio de
+código: no le importa de qué dataset viene un modelo, solo lee sus
+metadatos.
+
+**Ojo:** si entrenas primero con `train_model.ipynb` (iris) y después
+con `train_model_penguins.ipynb`, la API pasa a usar automáticamente
+el de pingüinos (siempre sirve el `.joblib` más reciente por fecha),
+y viceversa. Si le mandas a `/predict` un vector `features` con la
+cantidad de columnas que no corresponde al modelo actualmente cargado,
+la API responde `422` en vez de una predicción incorrecta silenciosa
+(valida `len(features)` contra `feature_names` de los metadatos).
+
 ## 3. Consumir el modelo desde la API
 
 ```bash

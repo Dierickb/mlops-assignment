@@ -22,6 +22,7 @@ services:
       - "8888:8888"
     volumes:
       - ./ml_jupyter/train_model.ipynb:/app/notebooks/train_model.ipynb
+      - ./ml_jupyter/train_model_penguins.ipynb:/app/notebooks/train_model_penguins.ipynb
       - ./models:/models
     environment:
       - MODELS_DIR=/models

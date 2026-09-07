@@ -18,7 +18,7 @@ def health():
 
 @router.get("/models")
 def list_models():
-    files = registry.list_model_files()
+    files = registry.list_model_files_with_metadata()
     current = registry.current
     return {
         "available_models": files,
@@ -40,13 +40,24 @@ def reload_model():
 
 @router.post("/predict", response_model=PredictResponse)
 def predict_species(datos: PredictRequest):
-    loaded = registry.refresh_if_needed()
-    if loaded is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No hay modelos (.joblib) en {registry.models_dir}. "
-            "Entrena uno primero desde el notebook (train_model.ipynb).",
-        )
+    if datos.model_file:
+        try:
+            loaded = registry.load_by_name(datos.model_file)
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No existe el modelo '{datos.model_file}' en "
+                f"{registry.models_dir}. Usa GET /models para ver los disponibles.",
+            )
+    else:
+        best_file = registry.best_by_accuracy()
+        if best_file is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No hay modelos con accuracy registrado en "
+                f"{registry.models_dir}. Entrena uno desde el notebook.",
+            )
+        loaded = registry.load_by_name(best_file)
 
     expected_features = len(loaded.metadata.get("feature_names", []) or [])
     if expected_features and len(datos.features) != expected_features:
@@ -73,4 +84,5 @@ def predict_species(datos: PredictRequest):
         prediction_label=label,
         model_file=loaded.model_file,
         model_trained_at=loaded.metadata.get("created_at"),
+        model_accuracy=loaded.metadata.get("accuracy")
     )

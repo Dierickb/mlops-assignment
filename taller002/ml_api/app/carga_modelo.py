@@ -30,9 +30,35 @@ class ModelRegistry:
         files.sort(key=lambda f: os.path.getmtime(os.path.join(self.models_dir, f)))
         return files
 
+    def list_model_files_with_metadata(self):
+        files = self.list_model_files()
+        result = []
+        for f in files:
+            meta_path = os.path.join(self.models_dir, f.replace(".joblib", ".json"))
+            metadata = {}
+            if os.path.isfile(meta_path):
+                with open(meta_path) as meta_file:
+                    metadata = json.load(meta_file)
+            result.append({
+                "model_file": f, 
+                "accuracy": metadata.get("accuracy"),
+                "algorithm": metadata.get("algorithm"),
+                "created_at": metadata.get("created_at"),
+                })
+        return result
+
     def _latest_file(self):
         files = self.list_model_files()
         return files[-1] if files else None
+
+    def best_by_accuracy(self):
+        with_accuracy = [
+            f for f in self.list_model_files_with_metadata() if f.get("accuracy") is not None
+        ]
+        if not with_accuracy:
+            return None
+        best = max(with_accuracy, key=lambda f: f["accuracy"])
+        return best["model_file"]
 
     def _load(self, filename: str) -> LoadedModel:
         model_path = os.path.join(self.models_dir, filename)
@@ -50,6 +76,15 @@ class ModelRegistry:
             mtime=os.path.getmtime(model_path),
             metadata=metadata,
         )
+
+    def load_by_name(self, file_name: str) -> Optional[LoadedModel]:
+        if not file_name.endswith(".joblib"):
+            file_name = f"{file_name}.joblib"
+        if not os.path.isfile(os.path.join(self.models_dir, file_name)):
+            return None
+        with self._lock:
+            self._current = self._load(file_name)
+            return self._current
 
     def refresh_if_needed(self) -> Optional[LoadedModel]:
         """Recarga el modelo si hay un archivo .joblib más nuevo que el

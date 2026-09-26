@@ -1,0 +1,17 @@
+[project]
+name = "proyecto1-inference-api"
+version = "0.1.0"
+description = "API de inferencia base para proyecto1 (esqueleto: solo /health por ahora)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.128.8",
+    "uvicorn>=0.39.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = false

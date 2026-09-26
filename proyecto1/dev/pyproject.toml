@@ -1,0 +1,26 @@
+[project]
+name = "dev"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Dierickb", email = "dierickbro@gmail.com" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "apache-airflow==2.6.0",
+    "joblib>=1.5.3",
+    "minio>=7.2.20",
+    "pandas",
+    "psycopg2-binary",
+    "requests",
+    "scikit-learn>=1.6.1",
+    "sqlalchemy",
+]
+
+[project.scripts]
+dev = "dev:main"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"

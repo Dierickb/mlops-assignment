@@ -14,6 +14,8 @@ x-airflow-common:
     AIRFLOW__CORE__LOAD_EXAMPLES: 'False'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # Misma clave en webserver y scheduler: sin ella la UI da 403 al leer logs de tareas.
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY}
     MLOPS_DB_URI: postgresql+psycopg2://${POSTGRES_DATA_USER}:${POSTGRES_DATA_PASSWORD}@postgres-data:5432/${POSTGRES_DATA_DB}
     EXTERNAL_API_BASE_URL: ${EXTERNAL_API_BASE_URL}
     GRUPO_NUMERO: ${GRUPO_NUMERO}
@@ -80,7 +82,8 @@ services:
     volumes:
       - minio-data-volume:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # Las imagenes recientes de MinIO ya no traen curl; `mc ready local` es el healthcheck oficial.
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       retries: 5
       start_period: 5s

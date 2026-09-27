@@ -1,6 +1,5 @@
-# docker-compose.yaml de proyecto1 -- infraestructura base.
-# La logica del pipeline (DAG) y la carga de modelos desde MinIO en la API
-# se construyen aparte, encima de esta base.
+# docker-compose.yaml de proyecto1: Airflow (LocalExecutor) + PostgreSQL (metadatos y datos)
+# + MinIO (modelos) + API de inferencia. Arquitectura y decisiones: ver README.md.
 x-airflow-common:
   &airflow-common
   build:

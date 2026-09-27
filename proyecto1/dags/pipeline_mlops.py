@@ -12,6 +12,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from minio import Minio
 from airflow import DAG
+from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator
 
 
@@ -37,7 +38,10 @@ COVERTYPE_NUMERIC_COLUMNS = [
 COVERTYPE_ALL_COLUMNS = COVERTYPE_NUMERIC_COLUMNS + ["Wilderness_Area", "Soil_Type", "Cover_Type"]
 FEATURE_COLUMNS = COVERTYPE_NUMERIC_COLUMNS + ["Wilderness_Area", "Soil_Type"]
 TARGET_COLUMN = "Cover_Type"
-MIN_TRAIN_ROWS = 50
+# Minimo de filas unicas en train_ready para entrenar: ~ un lote completo (cada lote trae
+# 5.810 filas). Desde la primera ejecucion ya se supera, asi que cada ejecucion completa el
+# proceso (regla del enunciado), pero protege contra lotes truncados o una BD recien vaciada.
+MIN_TRAIN_ROWS = 5000
 
 # Hiperparametros elegidos con dev/experimento_tamano_modelo.py (datos reales, 37.939 filas):
 # 50 arboles + max_depth=20 -> accuracy 0.9632 vs 0.9648 del modelo sin limite (-0.16 pts)
@@ -149,9 +153,12 @@ def train_model(**context):
 
     n_clases = df[TARGET_COLUMN].nunique()
     if len(df) < MIN_TRAIN_ROWS or n_clases < 2:
-        raise ValueError(
-            f"Datos insuficientes para entrenar: {len(df)} filas, {n_clases} clases. "
-            "Se conserva el modelo anterior en MinIO."
+        # Skip, no error: faltar datos es un estado ESPERADO, no una falla. En Airflow queda
+        # en rosado ("skipped") y cleanup_models tambien se salta. La API sigue sirviendo el
+        # ultimo modelo publicado.
+        raise AirflowSkipException(
+            f"Datos insuficientes para entrenar: {len(df)} filas (minimo {MIN_TRAIN_ROWS}), "
+            f"{n_clases} clases. Se conserva el modelo anterior en MinIO."
         )
 
     X = df[FEATURE_COLUMNS]

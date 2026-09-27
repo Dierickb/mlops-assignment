@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import gzip
 import io
 import json
 import pickle
@@ -37,6 +38,15 @@ COVERTYPE_ALL_COLUMNS = COVERTYPE_NUMERIC_COLUMNS + ["Wilderness_Area", "Soil_Ty
 FEATURE_COLUMNS = COVERTYPE_NUMERIC_COLUMNS + ["Wilderness_Area", "Soil_Type"]
 TARGET_COLUMN = "Cover_Type"
 MIN_TRAIN_ROWS = 50
+
+# Hiperparametros elegidos con dev/experimento_tamano_modelo.py (datos reales, 37.939 filas):
+# 50 arboles + max_depth=20 -> accuracy 0.9632 vs 0.9648 del modelo sin limite (-0.16 pts)
+# con 16.7 MB en vez de 41.1 MB; comprimido con gzip queda en ~2.3 MB.
+MODEL_N_ESTIMATORS = 50
+MODEL_MAX_DEPTH = 20
+
+# Retencion en MinIO: se conservan los ultimos N modelos (~1 hora = un ciclo de 10 lotes).
+MODELS_TO_KEEP = 12
 default_args = {
     "owner": "grupo7",
     "retries": 1,
@@ -128,7 +138,7 @@ def train_model(**context):
     import sklearn
     from sklearn.compose import ColumnTransformer
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import accuracy_score
+    from sklearn.metrics import accuracy_score, f1_score
     from sklearn.model_selection import train_test_split
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import OneHotEncoder
@@ -155,10 +165,19 @@ def train_model(**context):
             [("cat", OneHotEncoder(handle_unknown="ignore"), ["Wilderness_Area", "Soil_Type"])],
             remainder="passthrough",
         )),
-        ("clf", RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=1)),
+        ("clf", RandomForestClassifier(
+            n_estimators=MODEL_N_ESTIMATORS,
+            max_depth=MODEL_MAX_DEPTH,
+            random_state=42,
+            n_jobs=1,
+        )),
     ])
     model.fit(X_train, y_train)
-    accuracy = accuracy_score(y_test, model.predict(X_test))
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    # F1 macro: promedia el F1 de cada clase con el mismo peso. Con clases tan desbalanceadas
+    # (0 y 1 son ~92% de los datos) el accuracy casi solo refleja las clases grandes.
+    f1_macro = f1_score(y_test, y_pred, average="macro")
 
     model_name = f"covertype_rf_{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
 
@@ -168,42 +187,81 @@ def train_model(**context):
     # DESPUES de dill, asi que joblib.dump deja referencias a dill en el modelo y la API
     # (que no tiene dill) no puede cargarlo. El Pickler en C no usa esa tabla.
     # Protocolo 4: el mas alto que soporta Python 3.7 (Airflow); Python 3.10 (API) lo lee.
-    # joblib.load (en la API) lee sin problema un pickle estandar.
-    model_buffer = io.BytesIO()
-    pickle.dump(model, model_buffer, protocol=4)
-    model_buffer.seek(0)
+    model_bytes = pickle.dumps(model, protocol=4)
 
-    # Validar el artefacto ANTES de publicarlo: nunca subir un modelo que la API no pueda cargar.
-    if b"dill" in model_buffer.getvalue():
+    # Validar el artefacto ANTES de publicarlo (sobre el pickle SIN comprimir: dentro del
+    # gzip los bytes cambian y la busqueda no serviria).
+    if b"dill" in model_bytes:
         raise RuntimeError("El modelo serializado depende de dill; no se sube a MinIO.")
+
+    # Comprimir: un Random Forest serializado se comprime ~7x (arreglos muy repetitivos).
+    # joblib.load (en la API) reconoce el gzip por sus primeros bytes y lo descomprime solo.
+    model_gz = gzip.compress(model_bytes, compresslevel=6)
+    model_file = f"{model_name}.pkl.gz"
 
     metadata = {
         "model_name": model_name,
-        "model_file": f"{model_name}.pkl",
+        "model_file": model_file,
         "created_at": datetime.utcnow().isoformat(),
         "accuracy": round(float(accuracy), 4),
+        "f1_macro": round(float(f1_macro), 4),
         "n_train_rows": len(X_train),
         "n_test_rows": len(X_test),
         "features": FEATURE_COLUMNS,
         "classes": sorted(int(c) for c in y.unique()),
+        "model_params": {"n_estimators": MODEL_N_ESTIMATORS, "max_depth": MODEL_MAX_DEPTH},
+        "serialization": "pickle protocol 4 + gzip",
+        "size_bytes": len(model_gz),
         "sklearn_version": sklearn.__version__,
     }
     meta_bytes = json.dumps(metadata, indent=2).encode("utf-8")
 
     client = _get_minio()
     client.put_object(
-        MINIO_BUCKET, f"{model_name}.pkl", model_buffer,
-        length=model_buffer.getbuffer().nbytes, content_type="application/octet-stream",
+        MINIO_BUCKET, model_file, io.BytesIO(model_gz),
+        length=len(model_gz), content_type="application/gzip",
     )
+    # El .json va AL FINAL: es la senal de "modelo completo" que busca la API.
     client.put_object(
         MINIO_BUCKET, f"{model_name}.json", io.BytesIO(meta_bytes),
         length=len(meta_bytes), content_type="application/json",
     )
-    print(f"Modelo {model_name} subido a MinIO (accuracy={accuracy:.4f}).")
+    print(
+        f"Modelo {model_name} subido a MinIO: accuracy={accuracy:.4f}, "
+        f"f1_macro={f1_macro:.4f}, {len(model_gz) / 2**20:.1f} MB comprimido."
+    )
+
+
+def cleanup_models(**context):
+    """Retencion: conserva solo los ultimos MODELS_TO_KEEP modelos en MinIO.
+
+    Borra por CANTIDAD, no por antiguedad: aunque el DAG deje de entrenar dias,
+    siempre quedan modelos y la API nunca se queda sin uno.
+    """
+    client = _get_minio()
+    names = sorted(
+        obj.object_name[: -len(".json")]
+        for obj in client.list_objects(MINIO_BUCKET)
+        if obj.object_name.endswith(".json")
+    )  # el nombre lleva la hora UTC -> orden cronologico
+    to_delete = names[:-MODELS_TO_KEEP]
+
+    for name in to_delete:
+        # Primero el .json (la senal de "modelo completo"): asi la API nunca ve un
+        # modelo anunciado cuyo archivo ya no existe. Luego el resto con ese prefijo.
+        client.remove_object(MINIO_BUCKET, f"{name}.json")
+        for obj in client.list_objects(MINIO_BUCKET, prefix=name):
+            client.remove_object(MINIO_BUCKET, obj.object_name)
+
+    print(
+        f"Retencion: {len(names)} modelos encontrados, {len(to_delete)} eliminados, "
+        f"{min(len(names), MODELS_TO_KEEP)} conservados."
+    )
+
 
 with DAG(
     dag_id="pipeline_mlops_grupo7",
-    description="Ingesta por lotes -> preprocesamiento -> set de entrenamiento -> modelo en MinIO",
+    description="Ingesta por lotes -> preprocesamiento -> set de entrenamiento -> modelo en MinIO -> retencion",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
     schedule="*/5 * * * *",
@@ -216,5 +274,6 @@ with DAG(
     t_preprocess = PythonOperator(task_id="preprocess", python_callable=preprocess)
     t_build = PythonOperator(task_id="build_training_set", python_callable=build_training_set)
     t_train = PythonOperator(task_id="train_model", python_callable=train_model)
+    t_cleanup = PythonOperator(task_id="cleanup_models", python_callable=cleanup_models)
 
-    t_fetch >> t_preprocess >> t_build >> t_train
+    t_fetch >> t_preprocess >> t_build >> t_train >> t_cleanup

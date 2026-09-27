@@ -70,7 +70,10 @@ services:
     restart: always
 
   minio:
-    image: minio/minio:latest
+    # MinIO dejo de distribuir imagenes: borro minio/minio y minio/mc de Docker Hub y
+    # cerro quay.io/minio (sep-2026). Se usa Silo, fork de MinIO mantenido por PGSTY:
+    # mismo codigo, mismo protocolo S3, mismas variables MINIO_*. Tag fijo, no :latest.
+    image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     container_name: proyecto1_minio
     command: server /data --console-address ":9001"
     environment:
@@ -90,7 +93,7 @@ services:
     restart: always
 
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
     container_name: proyecto1_minio_init
     depends_on:
       minio:
@@ -105,18 +108,25 @@ services:
   airflow-init:
     <<: *airflow-common
     container_name: proyecto1_airflow_init
+    # Patron oficial de Airflow (igual que taller003): el contenedor corre como root solo
+    # para dar permisos a las carpetas montadas, y delega la inicializacion al /entrypoint
+    # de la imagen, que ejecuta `airflow db upgrade` y crea el usuario con el entorno correcto.
+    # Antes se llamaba `airflow ...` directo como root: fallaba, pero el script terminaba en
+    # `|| true` y salia con codigo 0, ocultando el error. `set -e` + `exec` propagan el fallo.
     entrypoint: /bin/bash
     command:
       - -c
       - |
+        set -e
         mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins
-        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/{logs,dags,plugins}
-        airflow db upgrade
-        airflow users create \
-          --username "${_AIRFLOW_WWW_USER_USERNAME:-airflow}" \
-          --password "${_AIRFLOW_WWW_USER_PASSWORD:-airflow}" \
-          --firstname Admin --lastname User --role Admin \
-          --email admin@proyecto1.local || true
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins
+        exec /entrypoint airflow version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
     user: "0:0"
 
   airflow-webserver:

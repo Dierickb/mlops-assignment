@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import io
 import json
+import pickle
 from datetime import datetime, timedelta
 
 import requests
@@ -124,7 +125,6 @@ def build_training_set(**context):
     print(f"train_ready.covertype_train: {len(df)} filas unicas (de {total} acumuladas).")
 
 def train_model(**context):
-    import joblib
     import sklearn
     from sklearn.compose import ColumnTransformer
     from sklearn.ensemble import RandomForestClassifier
@@ -155,20 +155,31 @@ def train_model(**context):
             [("cat", OneHotEncoder(handle_unknown="ignore"), ["Wilderness_Area", "Soil_Type"])],
             remainder="passthrough",
         )),
-        ("clf", RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)),
+        ("clf", RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=1)),
     ])
     model.fit(X_train, y_train)
     accuracy = accuracy_score(y_test, model.predict(X_test))
 
     model_name = f"covertype_rf_{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
 
+    # Serializamos con pickle (implementacion en C), NO con joblib.dump.
+    # Airflow importa `dill` al arrancar, y dill registra sus propias funciones en el pickle
+    # de Python puro. joblib copia esa tabla (NumpyPickler.dispatch) al importarse, o sea
+    # DESPUES de dill, asi que joblib.dump deja referencias a dill en el modelo y la API
+    # (que no tiene dill) no puede cargarlo. El Pickler en C no usa esa tabla.
+    # Protocolo 4: el mas alto que soporta Python 3.7 (Airflow); Python 3.10 (API) lo lee.
+    # joblib.load (en la API) lee sin problema un pickle estandar.
     model_buffer = io.BytesIO()
-    joblib.dump(model, model_buffer)
+    pickle.dump(model, model_buffer, protocol=4)
     model_buffer.seek(0)
+
+    # Validar el artefacto ANTES de publicarlo: nunca subir un modelo que la API no pueda cargar.
+    if b"dill" in model_buffer.getvalue():
+        raise RuntimeError("El modelo serializado depende de dill; no se sube a MinIO.")
 
     metadata = {
         "model_name": model_name,
-        "model_file": f"{model_name}.joblib",
+        "model_file": f"{model_name}.pkl",
         "created_at": datetime.utcnow().isoformat(),
         "accuracy": round(float(accuracy), 4),
         "n_train_rows": len(X_train),
@@ -181,7 +192,7 @@ def train_model(**context):
 
     client = _get_minio()
     client.put_object(
-        MINIO_BUCKET, f"{model_name}.joblib", model_buffer,
+        MINIO_BUCKET, f"{model_name}.pkl", model_buffer,
         length=model_buffer.getbuffer().nbytes, content_type="application/octet-stream",
     )
     client.put_object(
@@ -201,7 +212,7 @@ with DAG(
     tags=["proyecto1", "grupo7"],
 ) as dag:
 
-    t_fetch = PythonOperator(task_id="fetch_batch", python_callable=fetch_batch_grupo7)
+    t_fetch = PythonOperator(task_id="fetch_batch", python_callable=fetch_batch_grupo7,retries=0)
     t_preprocess = PythonOperator(task_id="preprocess", python_callable=preprocess)
     t_build = PythonOperator(task_id="build_training_set", python_callable=build_training_set)
     t_train = PythonOperator(task_id="train_model", python_callable=train_model)

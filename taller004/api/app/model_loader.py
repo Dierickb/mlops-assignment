@@ -3,12 +3,16 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
+import mlflow
+from mlflow import MlflowClient
+
 import pandas as pd
 
 MLFLOW_TRACKING_URI = os.environ["MLFLOW_TRACKING_URI"]
 MODEL_NAME = os.environ["MODEL_NAME"]
 MODEL_ALIAS = os.environ["MODEL_ALIAS"]
 
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
 @dataclass
 class LoadedModel:
@@ -29,15 +33,22 @@ class MlflowModelLoader:
     def __init__(self):
         self._lock = threading.Lock()
         self._current: Optional[LoadedModel] = None
+        self._client = MlflowClient() 
 
     def _load(self) -> LoadedModel:
-        # TODO(taller004): implementar la carga desde MLflow. Ver NOTAS_PENDIENTES.md, punto 3.
-        raise NotImplementedError("Carga desde MLflow pendiente (ver NOTAS_PENDIENTES.md)")
+        mv = self._client.get_model_version_by_alias(name=MODEL_NAME, alias=MODEL_ALIAS)
+        model = mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}/{mv.version}")
+        return LoadedModel(
+            model=model,
+            name=MODEL_NAME,
+            version=mv.version,
+            alias=MODEL_ALIAS,
+            run_id=mv.run_id,
+        )
 
     def _latest_version(self) -> Optional[str]:
-        # TODO(taller004): devolver la version que apunta hoy el alias, para saber si
-        # hay que recargar. Ver NOTAS_PENDIENTES.md, punto 3.
-        raise NotImplementedError("Consulta del alias en MLflow pendiente (ver NOTAS_PENDIENTES.md)")
+        mv = self._client.get_model_version_by_alias(name=MODEL_NAME, alias=MODEL_ALIAS)
+        return mv.version
 
     def refresh_if_needed(self) -> LoadedModel:
         version = self._latest_version()
@@ -53,8 +64,6 @@ class MlflowModelLoader:
 
     def predict(self, X: pd.DataFrame) -> str:
         loaded = self.refresh_if_needed()
-        # TODO(taller004): convertir la salida del modelo a nombre de especie si el
-        # modelo devuelve indices en vez de strings. Ver NOTAS_PENDIENTES.md, punto 3.
         return str(loaded.model.predict(X)[0])
 
     @property

@@ -1,6 +1,6 @@
 # docker-compose.yaml de taller004: MLflow (metadata en Postgres, artefactos en MinIO)
 # + Postgres de datos (separado) + JupyterLab + API de inferencia.
-# Arquitectura y decisiones: ver README.md. Pendientes: ver NOTAS_PENDIENTES.md.
+# Arquitectura y decisiones: ver README.md (y el README de cada servicio).
 
 services:
   # ---------------------------------------------------------------------------

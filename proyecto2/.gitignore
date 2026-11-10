@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+# El CSV fuente se descarga (ver README); no se versiona.
+data/*.csv

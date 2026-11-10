@@ -1,0 +1,29 @@
+# Punto de entrada del despliegue:  kubectl apply -k k8s/
+# Kustomize viene integrado en kubectl: no hay que instalar nada.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: mlops
+
+resources:
+  - namespace.yaml
+  - config/configmap.yaml
+  # Fase 1: capa de datos y MLflow
+  - postgres-data/statefulset.yaml
+  - postgres-mlflow/statefulset.yaml
+  - minio/statefulset.yaml
+  - minio/job-create-bucket.yaml
+  - mlflow/deployment.yaml
+
+# El script SQL vive como archivo .sql (legible, versionable) y kustomize lo
+# convierte en ConfigMap. OJO: Postgres solo lo ejecuta cuando el volumen esta vacio;
+# cambiarlo despues no altera una base ya creada (el DAG lo re-ejecuta, es idempotente).
+configMapGenerator:
+  - name: postgres-data-init
+    files:
+      - postgres-data/init/01-schemas.sql
+
+# UN solo lugar para el usuario de DockerHub y los tags de las imagenes propias.
+images:
+  - name: mlops-p2-mlflow
+    newName: docker.io/dierick/mlops-p2-mlflow
+    newTag: "3.16.1"

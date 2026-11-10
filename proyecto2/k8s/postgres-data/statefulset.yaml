@@ -1,0 +1,83 @@
+# Postgres de DATOS: capas raw / clean / inference.
+# StatefulSet (no Deployment): identidad estable y un PVC propio que sobrevive al pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-data
+  labels:
+    app: postgres-data
+spec:
+  clusterIP: None            # headless: el DNS "postgres-data" apunta directo al pod
+  selector:
+    app: postgres-data
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-data
+  labels:
+    app: postgres-data
+spec:
+  serviceName: postgres-data
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-data
+  template:
+    metadata:
+      labels:
+        app: postgres-data
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: postgres-data-credentials, key: DATA_DB_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres-data-credentials, key: DATA_DB_PASSWORD } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: postgres-data-credentials, key: DATA_DB_NAME } }
+            # Subcarpeta: algunos provisioners crean "lost+found" en la raiz del volumen
+            # y initdb se niega a usar un directorio que no este vacio.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 5
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-data-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

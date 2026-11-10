@@ -1,0 +1,20 @@
+# Configuracion NO sensible compartida por varios componentes.
+# Las credenciales van en Secrets (scripts/create-secrets.sh), nunca aqui.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlops-config
+data:
+  # MLflow
+  MLFLOW_TRACKING_URI: "http://mlflow:5000"
+  MLFLOW_BUCKET: "mlflow"
+  # MLflow 3.x rechaza (403) las peticiones cuyo Host no este en esta lista.
+  # Incluye el nombre del Service, sus FQDN, localhost (port-forward) y la red de pods (10.*).
+  MLFLOW_ALLOWED_HOSTS: "mlflow,mlflow:5000,mlflow.mlops,mlflow.mlops:5000,mlflow.mlops.svc,mlflow.mlops.svc:5000,mlflow.mlops.svc.cluster.local,mlflow.mlops.svc.cluster.local:5000,localhost,localhost:*,127.0.0.1,127.0.0.1:*,10.*,192.168.*"
+  # Modelo productivo que sirve la API (Model Registry de MLflow)
+  MODEL_NAME: "diabetes-readmission"
+  MODEL_ALIAS: "champion"
+  # Endpoints internos
+  MINIO_ENDPOINT: "http://minio:9000"
+  DATA_DB_HOST: "postgres-data"
+  DATA_DB_PORT: "5432"

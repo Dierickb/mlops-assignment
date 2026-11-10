@@ -1,0 +1,8 @@
+# Todo el proyecto vive en un solo namespace: los Services se resuelven por su nombre corto
+# (postgres-data, minio, mlflow...) y los Secrets se comparten sin duplicarlos.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mlops
+  labels:
+    app.kubernetes.io/part-of: mlops-proyecto2

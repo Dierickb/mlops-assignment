@@ -1,0 +1,104 @@
+# CI de la carpeta ci_cd/: pruebas en cada push/PR, imagen publicada solo desde main.
+# Basado en Niveles/3/CICD/github_actions/templates/ci-cd-unit-tests-dockerhub.yml
+# Cambios frente a la plantilla: paths/APP_PATH/IMAGE_NAME propios, Python 3.12,
+# requirements-dev.txt, pruebas rapidas y lentas separadas, un job que valida el
+# Dockerfile tambien en los PR, y publicacion de la etapa "runtime".
+
+name: CI Unit Tests + DockerHub Publish
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+    paths:
+      - "ci_cd/**"
+      - ".github/workflows/ci-cd-unit-tests-dockerhub.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "ci_cd/**"
+      - ".github/workflows/ci-cd-unit-tests-dockerhub.yml"
+  workflow_dispatch: # boton "Run workflow" en la pestana Actions (util para depurar)
+
+env:
+  PYTHON_VERSION: "3.12"
+  APP_PATH: "ci_cd"
+  IMAGE_NAME: "dierick/mlops-readmission-api"
+
+jobs:
+  # ---------------------------------------------------------------- 1. pytest
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip # reutiliza descargas entre ejecuciones
+          cache-dependency-path: ${{ env.APP_PATH }}/requirements*.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r $APP_PATH/requirements-dev.txt
+
+      - name: Run fast unit tests (with coverage)
+        working-directory: ${{ env.APP_PATH }}
+        run: pytest -m "not slow" --cov=app --cov-report=term-missing
+
+      - name: Run slow tests (model training)
+        working-directory: ${{ env.APP_PATH }}
+        run: pytest -m slow
+
+  # ------------------------------------- 2. el Dockerfile construye y sus pruebas pasan
+  docker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build --target test -t readmission-api:test $APP_PATH
+
+      - name: Run tests inside the container
+        run: docker run --rm readmission-api:test
+
+  # ------------------------------------------- 3. publicar (solo push a main en verde)
+  publish-dockerhub:
+    needs: [unit-tests, docker-tests] # espera a que AMBOS pasen
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Los secrets de Docker Hub viven en este environment, que solo acepta la rama main.
+    # El "if" de arriba se puede borrar editando este archivo; la regla del environment
+    # vive en Settings y solo un admin la cambia. Esa es la proteccion real.
+    environment: dockerhub
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.APP_PATH }}
+          target: runtime # la imagen de la API, sin pytest ni pruebas
+          platforms: linux/amd64 # la arquitectura de la VM / cluster
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}

@@ -1,0 +1,37 @@
+# Crea el bucket de MLflow y termina. Equivale a minio-init de proyecto1/taller004.
+# En Kubernetes no hay depends_on: el Job reintenta hasta que MinIO responde.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-bucket
+  labels:
+    app: minio-create-bucket
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: minio-create-bucket
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "Esperando a MinIO..."; sleep 3
+              done
+              mc mb --ignore-existing "local/$MLFLOW_BUCKET"
+              echo "Bucket $MLFLOW_BUCKET listo."
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom: { secretKeyRef: { name: minio-credentials, key: MINIO_ROOT_USER } }
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: minio-credentials, key: MINIO_ROOT_PASSWORD } }
+            - name: MLFLOW_BUCKET
+              valueFrom: { configMapKeyRef: { name: mlops-config, key: MLFLOW_BUCKET } }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 128Mi }

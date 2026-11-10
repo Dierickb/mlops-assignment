@@ -1,0 +1,14 @@
+[project]
+name = "proyecto2-mlflow"
+version = "0.1.0"
+description = "Servidor de tracking de MLflow (metadata en Postgres, artefactos en MinIO)"
+requires-python = "==3.12.*"
+# Misma version de MLflow que el cliente (mlflow-skinny) en Airflow y en la API.
+dependencies = [
+    "mlflow==3.16.1",
+    "psycopg2-binary==2.9.11",
+    "boto3==1.42.61",
+]
+
+[tool.uv]
+package = false

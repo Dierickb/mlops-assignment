@@ -1,0 +1,9 @@
+# Lo que NO se copia al contexto de build (imagen mas liviana y reproducible)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+models/
+.git

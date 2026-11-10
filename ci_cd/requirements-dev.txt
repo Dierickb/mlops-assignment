@@ -1,0 +1,6 @@
+# Dependencias de DESARROLLO / CI: runtime + herramientas de prueba.
+# No viajan en la imagen que se publica.
+-r requirements.txt
+pytest==9.2.0
+pytest-cov==7.1.0
+httpx2==2.16.0       # cliente HTTP que usa TestClient (Starlette 1.x depreco httpx en su favor)

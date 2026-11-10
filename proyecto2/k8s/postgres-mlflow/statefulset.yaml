@@ -1,0 +1,74 @@
+# Postgres DEDICADO a la metadata de MLflow (backend store: experimentos, runs, Model Registry).
+# Separado del de datos: el ciclo de vida de la herramienta no se mezcla con el de los datos.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-mlflow
+  labels:
+    app: postgres-mlflow
+spec:
+  clusterIP: None
+  selector:
+    app: postgres-mlflow
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-mlflow
+  labels:
+    app: postgres-mlflow
+spec:
+  serviceName: postgres-mlflow
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-mlflow
+  template:
+    metadata:
+      labels:
+        app: postgres-mlflow
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: postgres-mlflow-credentials, key: MLFLOW_DB_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres-mlflow-credentials, key: MLFLOW_DB_PASSWORD } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: postgres-mlflow-credentials, key: MLFLOW_DB_NAME } }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
